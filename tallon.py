@@ -52,6 +52,8 @@ class Tallon():
         # What moves are possible.
         self.moves = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
 
+           
+    def createMDP(self):
         #############
         # MDP stuff #
         #############
@@ -64,8 +66,8 @@ class Tallon():
         # define rewards, states, terminals
         rEmpty = 1/config.scoreInterval
         rBonus = config.bonusValue
-        rPit = -5
-        rMeanie = -10
+        rPit = -1 #-5
+        rMeanie = -5 #-10,-1 # balance between being afraid so not going near and being so afraid it runs into walls
 
         bLoc = self.gameWorld.getBonusLocation()
         pLoc = self.gameWorld.getPitsLocation()
@@ -74,28 +76,21 @@ class Tallon():
         for x in range(config.worldLength):
             for y in range(config.worldBreadth):
                 state = createPose(x,y)
-                
-                if utils.containedIn(state, bLoc):
-                    reward = rBonus
+                reward = 0
+                if utils.containedIn(state, mLoc):
+                    # meanie first to overwrite bonus if on same square
+                    reward = rMeanie
+                    self.terminals.add(state)
                 elif utils.containedIn(state, pLoc):
                     reward = rPit
                     self.terminals.add(state)
-                elif utils.containedIn(state, mLoc):
-                    reward = rMeanie
-                    self.terminals.add(state)
+                elif utils.containedIn(state, bLoc):
+                    reward = rBonus # + rEmpty
                 else:
                     reward = rEmpty
 
                 self.states.add(state)
                 self.reward[state] = reward
-
-        # show reward grid
-        grid = np.empty((10,10))
-        for state in self.states:
-            grid[state.y, state.x] = self.reward[state]
-            
-        print("↓ y+   → x+")
-        print(grid)
 
         # transition model - goal: P(s'|s,a) or T(s,a,s')
         # Stored as a list of pairs for probability and s' for each s, a
@@ -107,8 +102,18 @@ class Tallon():
             for action in self.A(state):
                 self.transitions[state][action] = self.calcT(state, action)
 
-        U = self.valueIteration()
+        #self.U = self.valueIteration()
+        #self.pi = self.optimalPolicy()
 
+    def displayGrids(self, U, pi):
+        # show reward grid
+        grid = np.empty((10,10))
+        for state in self.states:
+            grid[state.y, state.x] = self.reward[state]
+            
+        print("↓ y+   → x+")
+        print(grid)
+        
         # show utility grid
         Ugrid = np.empty((10,10))
         for state in self.states:
@@ -116,6 +121,17 @@ class Tallon():
             
         print("↓ y+   → x+")
         print(Ugrid)
+
+        # show policy grid
+        Pgrid = np.empty((10,10),dtype='U')
+        m = {Directions.NORTH:"▲", Directions.SOUTH:"▼",
+             Directions.WEST:"◄", Directions.EAST:"►", None:"•"} #30 31 16 17
+        for state in self.states:
+            a = pi[state]
+            Pgrid[state.y][state.x] = m[a]
+                       
+        print("↓ y+   → x+")
+        print(Pgrid)
 
     def valueIteration(self):
         """Return U(s) for all s as a dictionary of {s: value} pairs"""
@@ -140,6 +156,15 @@ class Tallon():
             if delta <= threshold:
                 print(i)
                 return U # why U not U1?
+
+    def expectedUtility(self, U, state, action):
+        return sum(p * U[s1] for (p, s1) in self.T(state, action))
+
+    def optimalPolicy(self, U):
+        pi = {}
+        for s in self.states:
+            pi[s] = max(self.A(s), key=lambda a: self.expectedUtility(U,s,a))
+        return pi
             
         
     def calcT(self, state, action):
@@ -255,10 +280,35 @@ class Tallon():
     def T(self, state, action):
         return self.transitions[state][action]
 
+    def getState(self, location):
+        """Return state that is equivalent to location. Location supplied as a pose"""
+               
+        for s in self.states:
+            if utils.sameLocation(location, s):
+                return s
+
+
     # move methods  
     def makeMove(self):
         # This is the function you need to define
 
+        self.createMDP()
+        U = self.valueIteration()
+
+        # for debugging
+        pi = self.optimalPolicy(U)
+        self.displayGrids(U,pi)
+        ######
+
+        tLoc = self.gameWorld.getTallonLocation()
+        tState = self.getState(tLoc)
+
+        # we get the move which maximises the expected utility from this state
+        # essentially computing the policy just for one space        
+        move = max(self.A(tState), key=lambda a: self.expectedUtility(U,tState,a))
+        return move
+
+        '''
         # For now we have a placeholder, which always moves Tallon
         # directly towards any existing bonuses. It ignores Meanies
         # and pits.
@@ -282,7 +332,7 @@ class Tallon():
                 return Directions.SOUTH
 
         # if there are no more bonuses, Tallon doesn't move
-
+        '''
 
 # for testing
 if __name__ == "__main__":
