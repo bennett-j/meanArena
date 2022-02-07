@@ -7,6 +7,8 @@
 # Written by: Simon Parsons
 # Last Modified: 12/01/22
 
+from statistics import mean
+import this
 from venv import create
 import world
 import random
@@ -32,6 +34,13 @@ def createPose(x,y):
     p.x = x
     p.y = y
     return p
+
+def updateMmm(mmm, s, p):
+    if s in mmm:
+        mmm[s] += p
+    else:
+        mmm[s] = p
+    return mmm
 
 
 # Representation of moves
@@ -67,11 +76,13 @@ class Tallon():
         rEmpty = 1/config.scoreInterval
         rBonus = config.bonusValue
         rPit = -1 #-5
-        rMeanie = -5 #-10,-1 # balance between being afraid so not going near and being so afraid it runs into walls
+        rMeanie = -10 #-10,-1 # balance between being afraid so not going near and being so afraid it runs into walls
 
         bLoc = self.gameWorld.getBonusLocation()
         pLoc = self.gameWorld.getPitsLocation()
         mLoc = self.gameWorld.getMeanieLocation()
+
+        
 
         for x in range(config.worldLength):
             for y in range(config.worldBreadth):
@@ -79,7 +90,8 @@ class Tallon():
                 reward = 0
                 if utils.containedIn(state, mLoc):
                     # meanie first to overwrite bonus if on same square
-                    reward = rMeanie
+                    # it is a terminal state because if you move to meanie's location it will stay there
+                    reward = rMeanie/2 #rMeanie
                     self.terminals.add(state)
                 elif utils.containedIn(state, pLoc):
                     reward = rPit
@@ -91,6 +103,11 @@ class Tallon():
 
                 self.states.add(state)
                 self.reward[state] = reward
+
+        meanieProbs = self.meanieT()
+        for m in meanieProbs:
+            for s in m:
+                self.reward[s] = m[s] * rMeanie
 
         # transition model - goal: P(s'|s,a) or T(s,a,s')
         # Stored as a list of pairs for probability and s' for each s, a
@@ -105,15 +122,19 @@ class Tallon():
         #self.U = self.valueIteration()
         #self.pi = self.optimalPolicy()
 
-    def displayGrids(self, U, pi):
+    def dispReward(self):
         # show reward grid
         grid = np.empty((10,10))
         for state in self.states:
-            grid[state.y, state.x] = self.reward[state]
+            grid[state.y, state.x] = round(self.reward[state],3)
             
         print("↓ y+   → x+")
         print(grid)
+    
+    def displayGrids(self, U, pi):
         
+        self.dispReward()
+
         # show utility grid
         Ugrid = np.empty((10,10))
         for state in self.states:
@@ -182,10 +203,11 @@ class Tallon():
                     (pSide, self.whatState(state, action, Moves.LEFT)),
                     (pSide, self.whatState(state, action, Moves.RIGHT))]
 
-    def whatState(self, state, direction, move):
+    def whatState(self, state, direction, move=None):
         """Return the state if *move* is made in the intended *direction*"""
         
-        direction = self.correctDirection(direction, move)
+        if move is not None:
+            direction = self.correctDirection(direction, move)
 
         x = state.x
         y = state.y
@@ -287,6 +309,95 @@ class Tallon():
             if utils.sameLocation(location, s):
                 return s
 
+    ##################
+    #  MEANIE MODEL  #
+    ##################
+    def meanieT(self):
+        mLocs = self.gameWorld.getMeanieLocation()
+        tLoc0 = self.gameWorld.getTallonLocation()
+        # TODO: make a 'this state' and use throughout for tLoc
+
+        print("Tallon Location: ", end = '')
+        tLoc0.print()
+
+        meanieProbs = []
+
+        for mLoc in mLocs:
+            
+            print("Meanie Location: ", end = '')
+            mLoc.print()
+
+            # TODO this is a bodge
+            mX0 = mLoc.x
+            mY0 = mLoc.y
+
+            # meanie motion model
+            mmm = {}
+
+            # repeat for every move Tallon could make to get possible locations
+            # meanie could move to and probability of going to that state.
+            # assumes equal likelyhood of each of Tallon's moves
+            for a in self.actions:
+                tLoc = self.whatState(self.getState(tLoc0), a)
+                mLoc = createPose(mX0, mY0)
+
+                if utils.separation(mLoc, tLoc) < config.senseDistance:
+                    # moveToTallon
+                    # If same x-coordinate, move in the y direction
+                    if mLoc.x == tLoc.x:
+                        mLoc.y = self.reduceDifference(mLoc.y, tLoc.y)
+                        mmm = updateMmm(mmm, self.getState(mLoc), 1.0)
+
+                    # If same y-coordinate, move in the x direction
+                    elif mLoc.y == tLoc.y:
+                        mLoc.x = self.reduceDifference(mLoc.x, tLoc.x)
+                        mmm = updateMmm(mmm, self.getState(mLoc), 1.0)       
+                    # If x and y both differ, approximate a diagonal
+                    # approach by randomising between moving in the x and
+                    # y direction.
+                    else:
+                        y = mLoc.y
+                        x = mLoc.x
+                        y1 = self.reduceDifference(y, tLoc.y)
+                        mmm = updateMmm(mmm, self.getState(createPose(x, y1)), 0.5)
+                        x1 = self.reduceDifference(x, tLoc.x)
+                        mmm = updateMmm(mmm, self.getState(createPose(x1, y)), 0.5)
+                else:
+                    # makeRandomMove
+                    # P(N),S,E,W = 1/6, P(stay)=1/3
+                    # if direction hits a wall then it stays
+
+                    # probability of staying in current state
+                    mmm = updateMmm(mmm, self.getState(mLoc), 2/6)
+                    # probability of NSWE
+                    # if one action is into a wall and returns this state, it will be added via the method
+                    for a in self.actions:
+                        s = self.whatState(self.getState(mLoc), a)
+                        mmm = updateMmm(mmm, s, 1/6)
+            
+              
+           
+            
+
+            # normalise mmm 
+            sumPs = sum(mmm.values())
+            for s in mmm:
+                print((s.x, s.y), ": ", mmm[s], end=', ')
+                mmm[s] /= sumPs
+                print(mmm[s])
+
+            meanieProbs.append(mmm)
+
+        return meanieProbs
+  
+    # Move value towards target. FOR MEANIE
+    def reduceDifference(self, value, target):
+        if value < target:
+            return value+1
+        elif value > target:
+            return value-1
+        else:
+            return value
 
     # move methods  
     def makeMove(self):
@@ -339,3 +450,6 @@ if __name__ == "__main__":
     from world import World
     gameWorld = World()
     player = Tallon(gameWorld)
+    player.createMDP()
+    #player.meanieT()
+    player.dispReward()
