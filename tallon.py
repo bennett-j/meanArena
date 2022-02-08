@@ -239,11 +239,13 @@ class Grid():
 
 class Tallon():
 
-    def __init__(self, arena):
+    def __init__(self, arena, gamma):
 
         # Make a copy of the world an attribute, so that Tallon can
         # query the state of the world
         self.gameWorld = arena
+
+        self.gamma = gamma
 
         self.g = Grid()
         self.meanieModel = MeanieTransitionModel(self.g)
@@ -266,14 +268,14 @@ class Tallon():
 
         self.refreshGrid()
         #self.dispReward()
-        U = self.valueIteration()
+        U = self.valueIteration(self.gamma)
 
         tLoc = self.gameWorld.getTallonLocation()
         tState = self.g.findState(tLoc)
 
         # for debugging
-        pi = self.optimalPolicy(U)
-        self.displayGrids(U,pi)
+        #pi = self.optimalPolicy(U)
+        #self.displayGrids(U,pi)
         
         #self.dispReward()
         ######
@@ -285,9 +287,9 @@ class Tallon():
         move = max(self.A(tState), key=lambda a: self.expectedUtility(U,tState,a))
 
         #debugging 
-        print("Tallon Location: ", end='')
-        tLoc.print()
-        print("Move: ", move)
+        #print("Tallon Location: ", end='')
+        #tLoc.print()
+        #print("Move: ", move)
 
         return move
 
@@ -432,12 +434,12 @@ class Tallon():
         print("↓ y+   → x+")
         print(Pgrid)
 
-    def valueIteration(self):
+    def valueIteration(self,gamma):
         """Return U(s) for all s as a dictionary of {s: value} pairs"""
 
         # fig 16.6
         U1 = {s: 0 for s in self.g.states}
-        gamma = 0.9
+        #gamma = 0.9
         epsilon = 0.001
         threshold = epsilon * (1 - gamma) / gamma  #Eqn 16.12
 
@@ -453,7 +455,7 @@ class Tallon():
                 # keep track of largest delta and keep iterating until done
                 delta = max(delta, abs(U1[s] - U[s]))
             if delta <= threshold:
-                print(i)
+                # print(i)
                 return U # why U not U1?
 
     def expectedUtility(self, U, state, action):
