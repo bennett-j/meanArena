@@ -25,7 +25,7 @@ dynamic = True
 #
 # If partialVisibility is True, Tallon will only see part of the
 # environment.
-partialVisibility = False
+partialVisibility = True
 #
 # The limits of visibility when visibility is partial
 visibilityLimit = 6

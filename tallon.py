@@ -7,10 +7,6 @@
 # Written by: Simon Parsons
 # Last Modified: 12/01/22
 
-from statistics import mean
-import this
-from venv import create
-from warnings import WarningMessage
 import world
 import random
 import utils
@@ -110,9 +106,9 @@ class MeanieTransitionModel():
         # normalise
         sumPs = sum(model.values())
         for s in model:
-            print((s.x, s.y), ": ", model[s], end=', ')
+            #print((s.x, s.y), ": ", model[s], end=', ')
             model[s] /= sumPs
-            print(model[s])
+            #print(model[s])
         return model
 
     def updateModel(self, s, p):
@@ -256,24 +252,43 @@ class Tallon():
         self.transitions = {}
         self.reward = {}
 
+        if config.partialVisibility:
+            self.savedPits = set()
+            self.savedBonuses = set()
+            self.exploredStates = set()
+            self.bonusesRemaining = config.numberOfBonuses
+            self.fullyExplored = False
+
     def makeMove(self):
         # This is the function you need to define
 
-        self.refreshGrid()
-        self.dispReward()
-        U = self.valueIteration()
+        
 
-        # for debugging
-        pi = self.optimalPolicy(U)
-        self.displayGrids(U,pi)
-        ######
+        self.refreshGrid()
+        #self.dispReward()
+        U = self.valueIteration()
 
         tLoc = self.gameWorld.getTallonLocation()
         tState = self.g.findState(tLoc)
 
+        # for debugging
+        pi = self.optimalPolicy(U)
+        self.displayGrids(U,pi)
+        
+        #self.dispReward()
+        ######
+
+        
+
         # we get the move which maximises the expected utility from this state
         # essentially computing the policy just for one space        
         move = max(self.A(tState), key=lambda a: self.expectedUtility(U,tState,a))
+
+        #debugging 
+        print("Tallon Location: ", end='')
+        tLoc.print()
+        print("Move: ", move)
+
         return move
 
     def refreshGrid(self):
@@ -287,6 +302,34 @@ class Tallon():
         pLoc = self.gameWorld.getPitsLocation()
         mLoc = self.gameWorld.getMeanieLocation()
         tLoc = self.gameWorld.getTallonLocation()
+
+        # update saved locations
+        if config.partialVisibility:
+            # if we collected a bonus on the last move, remove it from the saved bonus set
+            if self.gameWorld.justGrabbed():
+                for bonus in self.savedBonuses:
+                    if utils.sameLocation(tLoc, bonus):
+                        self.savedBonuses.remove(bonus)
+                        break
+
+            # save new pit and bonus locations and update from saved sets
+            # not concerned with saving meanie locations since they move
+            for b in bLoc: self.savedBonuses.add(b)
+            for p in pLoc: self.savedPits.add(p)
+            bLoc = list(self.savedBonuses)
+            pLoc = list(self.savedPits)
+
+            # add any visible locations to the saved state
+            if not self.fullyExplored:
+                for s in self.g.states:
+                    if utils.separation(s, tLoc) <= config.visibilityLimit:
+                        self.exploredStates.add(s) # won't add duplicates
+                
+                # determine if world fully explored
+                # saves computation on future iterations
+                if len(self.g.states) == len(self.exploredStates):
+                    self.fullyExplored = True
+                    print("Fully Explored")
 
         # if a pit or meanie, add to terminal states
         terminalLocs = pLoc + mLoc # join lists
@@ -310,6 +353,15 @@ class Tallon():
         rBonus = config.bonusValue
         rPit = -1 #-5
         rMeanie = -10 #-10,-1 # balance between being afraid so not going near and being so afraid it runs into walls
+        
+        if config.partialVisibility:
+            # reward for unexplored is available bonus points divided amongst all unexplored spaces
+            # once all rewards collected no incentive to explore over empty space reward
+            # does not consider pits exist in unexplored space, changing average
+            if not self.fullyExplored:
+                rUnexplored = rEmpty + (rBonus * self.bonusesRemaining)/(len(self.g.states)-len(self.exploredStates))
+            else:
+                rUnexplored = rEmpty # this won't be needed
 
         # populate initial reward grid
         for state in self.g.states:
@@ -323,7 +375,11 @@ class Tallon():
             elif utils.containedIn(state, bLoc):
                 reward = rBonus + rEmpty
             else:
-                reward = rEmpty
+                if config.partialVisibility:
+                    if self.fullyExplored or utils.containedIn(state, self.exploredStates):
+                        reward = rEmpty
+                    else:
+                        reward = rUnexplored
 
             self.reward[state] = reward
         
@@ -442,20 +498,7 @@ class Tallon():
     def T(self, state, action):
         return self.transitions[state][action]
 
-    # def getState(self, location):
-    #     """Return state that is equivalent to location. Location supplied as a pose"""
-               
-    #     for s in self.states:
-    #         if utils.sameLocation(location, s):
-    #             return s
-
     
-
-    # move methods  
-    
-
-       
-
 # for testing
 if __name__ == "__main__":
     from world import World
